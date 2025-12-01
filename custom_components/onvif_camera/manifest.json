@@ -1,0 +1,13 @@
+{
+  "domain": "onvif_camera",
+  "name": "ONVIF Camera MQTT PTZ",
+  "version": "0.1.0",
+  "documentation": "https://github.com/andydesheffield/OnVif_Camera",
+  "requirements": [
+    "paho-mqtt>=1.6.1",
+    "zeep>=4.2.1"
+  ],
+  "dependencies": [],
+  "codeowners": ["@andydesheffield"],
+  "iot_class": "local_push"
+}

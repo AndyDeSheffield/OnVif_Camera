@@ -1,0 +1,5 @@
+{
+  "name": "ONVIF Camera MQTT PTZ",
+  "content_in_root": false,
+  "domains": ["onvif_camera"]
+}

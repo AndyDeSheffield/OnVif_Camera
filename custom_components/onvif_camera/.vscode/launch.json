@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Main",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/custom_components/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+			"PYTHONIOENCODING": "utf-8"
+		  }
+	  }
+  ]
+}
