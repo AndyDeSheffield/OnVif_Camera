@@ -1,0 +1,23 @@
+cameras:
+  14_5d_34_71_ed_ea:
+    name: above_garage
+    ip: 192.168.2.21
+    port: 8080
+    user: admin
+    password: Ark674exc10
+    mqtt_host: localhost
+    mqtt_port: 1883
+    mqtt_user: mqtt_user
+    mqtt_password: pj3NoqyHw2wzAOjj16xB!
+
+  # Example of a second camera entry (currently commented out)
+  # aa_bb_cc_dd_ee_ff:
+  #   name: driveway
+  #   ip: 192.168.2.22
+  #   port: 8080
+  #   user: admin
+  #   password: AnotherPass
+  #   mqtt_host: localhost
+  #   mqtt_port: 1883
+  #   mqtt_user: mqtt_user
+  #   mqtt_password: mqttpass

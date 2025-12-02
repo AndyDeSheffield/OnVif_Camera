@@ -1,6 +1,6 @@
 from onvif import ONVIFCamera as ZeepONVIFCamera
 
-class ONVIFCamera:
+class ONVIFCameraAPI:
     """
     Wrapper for controlling cameras using ONVIF (via onvif-zeep).
     """
