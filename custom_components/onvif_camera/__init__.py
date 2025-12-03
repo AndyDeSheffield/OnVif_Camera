@@ -19,23 +19,6 @@ DOMAIN = "onvif_camera"
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """
     Home Assistant entrypoint for the onvif_camera integration.
-
-    - On Windows dev: main.py loads onvif_camera.yaml and injects it into config[DOMAIN].
-    - In HA runtime: config[DOMAIN] should be provided via configuration.yaml or other HA mechanisms.
-
-    Expected config dict:
-      {
-        "mqtt": {
-          "host": "localhost",
-          "port": 1883,
-          "user": "user",
-          "password": "pass"
-        },
-        "cameras": {
-          "cam1": { "name": "...", "ip": "...", "port": 8080, "user": "...", "password": "..." },
-          "cam2": { ... }
-        }
-      }
     """
     conf = config.get(DOMAIN, {})
     mqtt_conf = conf.get("mqtt", {})
@@ -55,10 +38,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         mqtt_username=mqtt_conf.get("user"),
         mqtt_password=mqtt_conf.get("password"),
     )
+    await ha_mqtt.connect()
 
     hass.data[DOMAIN] = {}
 
-    # Create and register CameraDevice objects
+    # Create and fully set up CameraDevice objects sequentially
     for unique_id, cam_conf in cameras_conf.items():
         try:
             cam = CameraDevice(
@@ -75,14 +59,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             continue
 
         hass.data[DOMAIN][unique_id] = cam
-        ha_mqtt.register_device(cam)
 
-        # Schedule discovery publish
-        create_task = getattr(hass, "async_create_task", None)
-        if callable(create_task):
-            create_task(cam.publish_discovery())
-        else:
-            # Windows stubs/dev runner
-            hass.loop.create_task(cam.publish_discovery())
+        # Await setup here instead of scheduling
+        await cam.setup()
 
     return True

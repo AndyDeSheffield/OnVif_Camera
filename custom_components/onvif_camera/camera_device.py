@@ -13,46 +13,161 @@ class CameraDevice:
     def __init__(self, unique_id, name, ip, port, user, password, ha_mqtt):
         self.unique_id = unique_id
         self.name = name
+        self.ip=ip
+        self.port=port
+        self.user=user
+        self.password=password
         self.ha_mqtt = ha_mqtt
-
+        self.mqtt_prefix='homeassistant'
+ 
         # Connect to ONVIF camera
         camera = ZeepONVIFCamera(ip, port, user, password)
         self._ptz = camera.create_ptz_service()
         media = camera.create_media_service()
         self._token = media.GetProfiles()[0].token
 
+    async def setup(self):
+        """Publish metadata, switches, and register callbacks once MQTT is connected."""
+        self.publish_static_data()
+        self.publish_switch_entities()
+        self.register_callbacks()
+
     # ----------------------------
     # MQTT discovery publishing
     # ----------------------------
-    async def publish_discovery(self):
-        switches = {
-            "pan_up": "Pan Up",
-            "pan_down": "Pan Down",
-            "pan_left": "Pan Left",
-            "pan_right": "Pan Right",
-            "zoom_in": "Zoom In",
-            "zoom_out": "Zoom Out",
+    def publish_static_data(self) -> bool:
+        """
+        Publishes static metadata for this camera to Home Assistant via MQTT.
+        """
+        topic = f"onvif_camera/device/{self.unique_id}/metadata"
+
+        device_payload = {
+            "identifiers": [self.unique_id],
+            "name": self.name,
+            "ip": self.ip,
+            "port": self.port,
+            "user": self.user,
         }
 
-        for key, label in switches.items():
-            object_id = f"{self.unique_id}_{key}"
-            config_topic = f"homeassistant/switch/{object_id}/config"
-            state_topic = f"{self.unique_id}/switch.{key}/state"
-            command_topic = f"{self.unique_id}/switch.{key}/set"
+        device_payload = {k: v for k, v in device_payload.items() if v is not None}
 
-            payload = {
-                "name": f"{self.name} {label}",
-                "unique_id": object_id,
-                "state_topic": state_topic,
-                "command_topic": command_topic,
-                "device": {
-                    "identifiers": [self.unique_id],
-                    "name": self.name,
-                },
-            }
-            self.ha_mqtt.publish(config_topic, json.dumps(payload), retain=True)
-            _LOGGER.info("Published discovery for %s %s", self.name, label)
+        try:
+            self.ha_mqtt.publish(topic, json.dumps(device_payload), retain=True)
+            _LOGGER.debug(
+                "Published camera '%s' metadata to topic '%s'", self.name, topic
+            )
+            return True
+        except Exception as e:
+            _LOGGER.error(
+                "Failed to publish metadata for camera %s: %s", self.unique_id, e
+            )
+            return False
 
+    def publish_switch_entities(self) -> bool:
+        actions = [
+            "pan_up", "pan_down", "pan_left", "pan_right",
+            "zoom_in", "zoom_out",
+            "go_home_position", "set_home_position",
+        ]
+
+        try:
+            for action in actions:
+                object_id = f"{self.unique_id}_{action}"
+                config_topic = f"{self.mqtt_prefix}/switch/{object_id}/config"
+                state_topic  = f"onvif_camera/{self.unique_id}/{action}/state"
+                command_topic= f"onvif_camera/{self.unique_id}/{action}/set"
+
+                payload = {
+                    "name": f"{self.name} {action.replace('_',' ').title()}",
+                    "unique_id": object_id,
+                    "state_topic": state_topic,
+                    "command_topic": command_topic,
+                    "device": {
+                        "identifiers": [self.unique_id],
+                        "name": self.name,
+                    },
+                }
+
+                self.ha_mqtt.publish(config_topic, json.dumps(payload), retain=True)
+                # Publish initial state (retained)
+                self.client.publish(state_topic, "OFF", retain=True)
+                _LOGGER.debug(
+                    "Published switch entity '%s' for camera '%s' to topic '%s'",
+                    action, self.name, config_topic,
+                )
+            return True
+        except Exception as e:
+            _LOGGER.error(
+                "Failed to publish switch entities for camera %s: %s", self.unique_id, e
+            )
+            return False
+        
+    # async def publish_discovery(self):
+    #     switches = {
+    #         "pan_up": "Pan Up",
+    #         "pan_down": "Pan Down",
+    #         "pan_left": "Pan Left",
+    #         "pan_right": "Pan Right",
+    #         "zoom_in": "Zoom In",
+    #         "zoom_out": "Zoom Out",
+    #     }
+
+    #     for key, label in switches.items():
+    #         object_id = f"{self.unique_id}_{key}"
+    #         config_topic = f"homeassistant/switch/{object_id}/config"
+    #         state_topic = f"{self.unique_id}/switch.{key}/state"
+    #         command_topic = f"{self.unique_id}/switch.{key}/set"
+
+    #         payload = {
+    #             "name": f"{self.name} {label}",
+    #             "unique_id": object_id,
+    #             "state_topic": state_topic,
+    #             "command_topic": command_topic,
+    #             "device": {
+    #                 "identifiers": [self.unique_id],
+    #                 "name": self.name,
+    #             },
+    #         }
+    #         self.ha_mqtt.publish(config_topic, json.dumps(payload), retain=True)
+    #         _LOGGER.info("Published discovery for %s %s", self.name, label)
+
+    def register_callbacks(self):
+        """
+        Register a single MQTT callback for all switch topics under this camera.
+        """
+        base_topic = f"{self.unique_id}/switch"
+        # Subscribe to everything under {unique_id}/switch
+        self.ha_mqtt.client.subscribe(f"{base_topic}/#")
+        self.ha_mqtt.client.message_callback_add(f"{base_topic}/#", self._on_command)
+
+    def _on_command(self, client, userdata, msg):
+        payload = msg.payload.decode()
+        _LOGGER.info("Camera %s received %s on %s", self.name, payload, msg.topic)
+
+        # Decide action based on the last part of the topic
+        subtopic = msg.topic.split("/")[-1]  # e.g. "pan_up", "zoom_out", "set"
+
+        if payload == "start":
+            if "pan_up" in msg.topic:
+                self.continuous_move(0, 0.1, 0)
+            elif "pan_down" in msg.topic:
+                self.continuous_move(0, -0.1, 0)
+            elif "pan_left" in msg.topic:
+                self.continuous_move(-0.1, 0, 0)
+            elif "pan_right" in msg.topic:
+                self.continuous_move(0.1, 0, 0)
+            elif "zoom_in" in msg.topic:
+                self.continuous_zoom(0.1)
+            elif "zoom_out" in msg.topic:
+                self.continuous_zoom(-0.1)
+            client.publish(msg.topic.replace("/set", "/state"), "ON", retain=True)
+
+        elif payload == "stop":
+            if "pan_" in msg.topic:
+                self.stop_move()
+            elif "zoom_" in msg.topic:
+                self.stop_zoom()
+            client.publish(msg.topic.replace("/set", "/state"), "OFF", retain=True)
     # ----------------------------
     # PTZ control methods
     # ----------------------------
