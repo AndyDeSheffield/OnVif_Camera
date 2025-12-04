@@ -35,6 +35,6 @@ async def main():
     ok = await async_setup(hass, config)
     print("Setup result:", ok)
     print("Cameras loaded:", list(hass.data.get("onvif_camera", {}).keys()))
-
+    await asyncio.Event().wait()  # blocks forever
 if __name__ == "__main__":
     asyncio.run(main())

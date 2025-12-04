@@ -52,7 +52,7 @@ class CameraDevice:
         device_payload = {k: v for k, v in device_payload.items() if v is not None}
 
         try:
-            self.ha_mqtt.publish(topic, json.dumps(device_payload), retain=True)
+            self.ha_mqtt.client.publish(topic, json.dumps(device_payload), retain=True)
             _LOGGER.debug(
                 "Published camera '%s' metadata to topic '%s'", self.name, topic
             )
@@ -67,7 +67,7 @@ class CameraDevice:
         actions = [
             "pan_up", "pan_down", "pan_left", "pan_right",
             "zoom_in", "zoom_out",
-            "go_home_position", "set_home_position",
+            "go_home_position", "restart",
         ]
 
         try:
@@ -88,9 +88,9 @@ class CameraDevice:
                     },
                 }
 
-                self.ha_mqtt.publish(config_topic, json.dumps(payload), retain=True)
+                self.ha_mqtt.client.publish(config_topic, json.dumps(payload), retain=True)
                 # Publish initial state (retained)
-                self.client.publish(state_topic, "OFF", retain=True)
+                self.ha_mqtt.client.publish(state_topic, "OFF", retain=True)
                 _LOGGER.debug(
                     "Published switch entity '%s' for camera '%s' to topic '%s'",
                     action, self.name, config_topic,
@@ -137,38 +137,48 @@ class CameraDevice:
         """
         base_topic = f"{self.unique_id}/switch"
         # Subscribe to everything under {unique_id}/switch
-        self.ha_mqtt.client.subscribe(f"{base_topic}/#")
-        self.ha_mqtt.client.message_callback_add(f"{base_topic}/#", self._on_command)
-
+        self.ha_mqtt.client.subscribe(f"onvif_camera/{self.unique_id}/+/set")
+        self.ha_mqtt.client.on_message = self._on_command
+   
     def _on_command(self, client, userdata, msg):
         payload = msg.payload.decode()
         _LOGGER.info("Camera %s received %s on %s", self.name, payload, msg.topic)
 
-        # Decide action based on the last part of the topic
-        subtopic = msg.topic.split("/")[-1]  # e.g. "pan_up", "zoom_out", "set"
+        # Extract the action keyword from the topic (e.g. "pan_up", "zoom_out")
+        action = msg.topic.split("/")[-2]  # assumes ".../<action>/set"
 
-        if payload == "start":
-            if "pan_up" in msg.topic:
-                self.continuous_move(0, 0.1, 0)
-            elif "pan_down" in msg.topic:
-                self.continuous_move(0, -0.1, 0)
-            elif "pan_left" in msg.topic:
-                self.continuous_move(-0.1, 0, 0)
-            elif "pan_right" in msg.topic:
-                self.continuous_move(0.1, 0, 0)
-            elif "zoom_in" in msg.topic:
-                self.continuous_zoom(0.1)
-            elif "zoom_out" in msg.topic:
-                self.continuous_zoom(-0.1)
-            client.publish(msg.topic.replace("/set", "/state"), "ON", retain=True)
+        match payload:
+            case "ON":
+                match action:
+                    case "pan_up":
+                        self.continuous_move(0, 0.1, 0)
+                    case "pan_down":
+                        self.continuous_move(0, -0.1, 0)
+                    case "pan_left":
+                        self.continuous_move(-0.1, 0, 0)
+                    case "pan_right":
+                        self.continuous_move(0.1, 0, 0)
+                    case "zoom_in":
+                        self.continuous_zoom(0.1)
+                    case "zoom_out":
+                        self.continuous_zoom(-0.1)
+                self.ha_mqtt.publish(msg.topic.replace("/set", "/state"), "ON", retain=True)
 
-        elif payload == "stop":
-            if "pan_" in msg.topic:
-                self.stop_move()
-            elif "zoom_" in msg.topic:
-                self.stop_zoom()
-            client.publish(msg.topic.replace("/set", "/state"), "OFF", retain=True)
-    # ----------------------------
+            case "OFF":
+                match action:
+                    case "pan_up" | "pan_down" | "pan_left" | "pan_right":
+                        self.stop_move()
+                    case "zoom_in" | "zoom_out":
+                        self.stop_zoom()
+                    case "restart":
+                        self.reconnect()
+                self.ha_mqtt.publish(msg.topic.replace("/set", "/state"), "OFF", retain=True)
+
+    def reconnect(self):
+            self.camera = None
+            # Recreate ONVIF client
+            self.camera = ZeepONVIFCamera(self.ip, self.port, self.user, self.password)
+        # ----------------------------
     # PTZ control methods
     # ----------------------------
     def continuous_move(self, pan: float, tilt: float, zoom: float):
