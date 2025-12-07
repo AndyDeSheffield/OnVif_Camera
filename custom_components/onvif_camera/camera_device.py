@@ -147,6 +147,7 @@ class CameraDevice:
 
     async def reconnect(self):
         self._camera = ZeepONVIFCamera(self.ip, self.port, self.user, self.password)
+        await self._camera.update_xaddrs()
         self._ptz = await self._camera.create_ptz_service()
         media = await self._camera.create_media_service()
         profiles = await media.GetProfiles()
